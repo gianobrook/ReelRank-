@@ -29,7 +29,7 @@ const CLOUD_URL='https://c--6c9c6fb3-b639-41e2-900c-7a95963e0ec4-prod.lovable.cl
 const CLOUD_PUBLIC_KEY='sb_publishable_AZiVbvgHBiEaPk0mJRaGwA_kfOKEiav';
 const CLOUD_CACHE='reelrank-catalog-cache-v1';
 let cloudOnline=false,lastSynced=null;
-const STORE='reelrank-v2-state';const SHEET_URL='https://docs.google.com/spreadsheets/d/1UxK7oycC7nHwVpBhDi1PN-CoFIxboD4HoE3yPA1ykZs/edit';
+const STORE='reelrank-v2-state';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}');}catch(e){}
 let movies=SEED.map(m=>({...m,...(saved[m.id]||{})}));
 for(let m of (saved.extra||[]))if(!movies.some(x=>x.id===m.id))movies.push(m);
