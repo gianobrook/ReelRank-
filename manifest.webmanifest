@@ -1,0 +1,25 @@
+{
+  "name": "ReelRank — My Movie Diary",
+  "short_name": "ReelRank",
+  "description": "Your personal movie ratings, rankings and posters.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0e16",
+  "theme_color": "#0b0e16",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
