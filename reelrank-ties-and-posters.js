@@ -94,7 +94,7 @@
     const resolved = posterFor(m);
     let markup = oldCard({...m, poster:resolved}, ranks, totalRanked);
     if (canReorder(m)) {
-      markup = markup.replace('draggable="false"', 'draggable="true"');
+      // Native browser dragging is intentionally disabled. A floating card follows the pointer.
       markup = markup.replace('class="movie ', 'class="movie tied-sortable ');
       markup = markup.replace('<div class="handle" title="Drag to reorder">', '<div class="handle" role="button" tabindex="0" aria-label="Drag to reorder ' + escapeHtml(m.title) + ' among movies with the same score" title="Drag to reorder tied ratings">');
     }
@@ -253,89 +253,7 @@
     hint.classList.toggle('hide', !((view==='rated'||view==='all')&&!useBattlePlacement()));
   };
 
-  const gridEl = document.getElementById('grid');
-  // The grip is for moving movies, not opening the movie editor on tap.
-  gridEl.addEventListener('click', e => {
-    if (e.target.closest('.tied-sortable .handle')) {
-      e.preventDefault(); e.stopImmediatePropagation();
-    }
-  }, true);
-  let pointerDrag = null;
-  let htmlDrag = null;
-  let highlight = null;
-  function clearHighlight() {
-    highlight?.classList.remove('tied-drop-target');
-    highlight = null;
-  }
-  function targetAt(x,y) {
-    const target = document.elementFromPoint(x,y)?.closest('.movie[data-id]');
-    if (!target || !target.classList.contains('tied-sortable')) return null;
-    return target;
-  }
-  function highlightTarget(target, sourceId) {
-    clearHighlight();
-    if (!target || target.dataset.id === sourceId) return;
-    const a = movies.find(m=>m.id===sourceId), b = movies.find(m=>m.id===target.dataset.id);
-    if (a && b && Number(a.score) === Number(b.score)) {
-      highlight = target;
-      highlight.classList.add('tied-drop-target');
-    }
-  }
-  gridEl.addEventListener('pointerdown',e=>{
-    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
-    const handle = e.target.closest('.tied-sortable .handle');
-    const cardEl = handle?.closest('.movie');
-    if (!cardEl) return;
-    e.preventDefault();
-    pointerDrag = {source:cardEl.dataset.id, pointerId:e.pointerId, destination:null, handle};
-    cardEl.classList.add('tied-dragging');
-    try {handle.setPointerCapture(e.pointerId);} catch(err){}
-  });
-  gridEl.addEventListener('pointermove',e=>{
-    if (!pointerDrag || e.pointerId!==pointerDrag.pointerId) return;
-    e.preventDefault();
-    const target = targetAt(e.clientX,e.clientY);
-    pointerDrag.destination = target?.dataset.id || null;
-    highlightTarget(target,pointerDrag.source);
-    if (e.clientY < 75) window.scrollBy(0,-10);
-    else if (e.clientY > innerHeight-75) window.scrollBy(0,10);
-  },{passive:false});
-  function finishPointer(e) {
-    if (!pointerDrag || e.pointerId!==pointerDrag.pointerId) return;
-    const {source,destination,handle} = pointerDrag;
-    pointerDrag = null;
-    try {if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);}catch(err){}
-    clearHighlight();
-    document.querySelectorAll('.tied-dragging').forEach(n=>n.classList.remove('tied-dragging'));
-    if (e.type!=='pointercancel' && destination && source!==destination) reorderTie(source,destination);
-  }
-  gridEl.addEventListener('pointerup',finishPointer);
-  gridEl.addEventListener('pointercancel',finishPointer);
-  gridEl.addEventListener('dragstart',e=>{
-    const cardEl = e.target.closest('.movie.tied-sortable');
-    if (!cardEl) return;
-    htmlDrag = cardEl.dataset.id;
-    cardEl.classList.add('tied-dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain',htmlDrag);
-  });
-  gridEl.addEventListener('dragover',e=>{
-    if (!htmlDrag) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect='move';
-    highlightTarget(e.target.closest('.movie.tied-sortable'),htmlDrag);
-  });
-  gridEl.addEventListener('drop',e=>{
-    if (!htmlDrag) return;
-    e.preventDefault();
-    const from = htmlDrag, to = e.target.closest('.movie.tied-sortable')?.dataset.id;
-    htmlDrag = null;clearHighlight();
-    if (to) reorderTie(from,to);
-  });
-  gridEl.addEventListener('dragend',()=>{
-    htmlDrag=null;clearHighlight();
-    gridEl.querySelectorAll('.tied-dragging').forEach(n=>n.classList.remove('tied-dragging'));
-  });
+  // Pointer drag and live animated sorting are provided by reelrank-smooth-drag.js.
 
   // New art is requested on demand; old cached mismatches are no longer displayed.
   render();
