@@ -326,7 +326,7 @@
     document.getElementById('lbZipFile').onchange=e=>{const file=e.target.files?.[0];void importSelectedFile(file);};
     // Ensure the app's existing backup includes all imported diary/watchlist edits.
     document.getElementById('exportBtn').onclick=()=>{
-      const data={version:4,movies,posterCache,awards:awardChoices,battleData,letterboxd:state,exportedAt:new Date().toISOString()};
+      const data={version:5,movies,posterCache,awards:awardChoices,battleData,letterboxd:state,topTen:window.reelrankExportTopTen?.(),exportedAt:new Date().toISOString()};
       const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
       const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='reelrank-full-backup.json';a.click();
       setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Full backup exported');
@@ -339,6 +339,7 @@
         state=parsed.letterboxd;persist();
       }
       await baseHandler(e);
+      if(parsed.topTen && typeof window.reelrankImportTopTen==='function')window.reelrankImportTopTen(parsed.topTen);
       redrawLB();
     };
   };
