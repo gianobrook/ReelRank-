@@ -3,6 +3,21 @@
   'use strict';
   const HOUR = 60 * 60 * 1000;
   const WINDOW = 32 * 24 * HOUR;
+  // Top 10 always covers all-time, without changing the year selected elsewhere.
+  let lastRegularYear = yearFilter;
+  document.querySelector('.tabs').addEventListener('click',e=>{
+    const next=e.target.closest('[data-view]')?.dataset.view;
+    if(!next) return;
+    if (view!=='all' && next==='all') lastRegularYear=yearFilter;
+    if (view==='all' && next!=='all') {
+      yearFilter=lastRegularYear;
+      const select=document.getElementById('yearSelect');
+      if(select) select.value=lastRegularYear;
+    }
+  },true);
+  document.getElementById('yearSelect').addEventListener('change',()=>{
+    if(view!=='all') lastRegularYear=yearFilter;
+  });
   const allTime = () => movies.filter(m => m.seen !== false && hasRating(m)).slice().sort(rankSorter);
   const baseSorted = sorted;
   sorted = function() {
