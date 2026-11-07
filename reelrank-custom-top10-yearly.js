@@ -3,7 +3,7 @@
   'use strict';
   const STORAGE = 'reelrank-top10-custom-v1';
   const UNRATED_FILTER_KEY = 'reelrank-unrated-placement-v1';
-  let unratedPlacement = localStorage.getItem(UNRATED_FILTER_KEY) === 'bottom' ? 'bottom' : 'top';
+  let unratedPlacement = localStorage.getItem(UNRATED_FILTER_KEY) === 'top' ? 'top' : 'bottom';
   let curation = {version:1,pins:{},excluded:[]};
   try {
     const stored=JSON.parse(localStorage.getItem(STORAGE)||'null');
