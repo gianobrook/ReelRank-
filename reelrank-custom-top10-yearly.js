@@ -2,6 +2,8 @@
 (() => {
   'use strict';
   const STORAGE = 'reelrank-top10-custom-v1';
+  const UNRATED_FILTER_KEY = 'reelrank-unrated-placement-v1';
+  let unratedPlacement = localStorage.getItem(UNRATED_FILTER_KEY) === 'bottom' ? 'bottom' : 'top';
   let curation = {version:1,pins:{},excluded:[]};
   try {
     const stored=JSON.parse(localStorage.getItem(STORAGE)||'null');
@@ -51,7 +53,12 @@
   }
   const beforeSorted=sorted;
   sorted=function(){
-    if(view!=='all')return beforeSorted();
+    if(view!=='all'){
+      const list=beforeSorted();
+      if(view!=='rated' || unratedPlacement!=='bottom')return list;
+      // Keep ratings and the existing ranking order intact; only move unrated cards.
+      return list.filter(hasRating).concat(list.filter(m=>!hasRating(m)));
+    }
     const list=topTen();
     return query.trim()?list.filter(m=>m.title.toLowerCase().includes(query.toLowerCase())):list;
   };
@@ -118,6 +125,33 @@
   yearly.id='reelYearlyTopThree';
   yearly.className='reel-year-top-three hide';
   document.querySelector('.count-row').before(yearly);
+
+  // Compact, one-tap filter in the My Rankings heading. Saved on this device.
+  const countRow=document.querySelector('.count-row');
+  const subtitle=document.getElementById('sectionSub');
+  const countControls=document.createElement('div');
+  countControls.className='reel-count-controls';
+  subtitle.before(countControls);
+  countControls.appendChild(subtitle);
+  const unratedFilter=document.createElement('button');
+  unratedFilter.id='reelUnratedFilter';
+  unratedFilter.type='button';
+  unratedFilter.className='reel-unrated-filter hide';
+  unratedFilter.setAttribute('aria-live','polite');
+  countControls.appendChild(unratedFilter);
+  function updateUnratedFilter(){
+    const show=view==='rated';
+    unratedFilter.classList.toggle('hide',!show);
+    unratedFilter.innerHTML='<span class="reel-filter-symbol" aria-hidden="true">≡</span> Unrated '+(unratedPlacement==='bottom'?'last':'first');
+    unratedFilter.title='Tap to put unrated movies '+(unratedPlacement==='bottom'?'at the top':'at the bottom');
+    unratedFilter.setAttribute('aria-label','Show unrated movies '+(unratedPlacement==='bottom'?'first':'last'));
+    unratedFilter.setAttribute('aria-pressed',unratedPlacement==='bottom'?'true':'false');
+  }
+  unratedFilter.addEventListener('click',()=>{
+    unratedPlacement=unratedPlacement==='bottom'?'top':'bottom';
+    try{localStorage.setItem(UNRATED_FILTER_KEY,unratedPlacement);}catch(e){toast('Could not save filter preference');}
+    render();
+  });
   function posterUrl(m){
     return (m.posterManual&&m.poster)||
       posterCache[String(m.year)+'|'+normName(m.title)]||
@@ -167,6 +201,7 @@
     const isTopTen=view==='all',isRankings=view==='rated';
     toolbar.classList.toggle('hide',!isTopTen);
     yearly.classList.toggle('hide',!isRankings || yearFilter!=='all');
+    updateUnratedFilter();
     if(isTopTen){
       renderTopTenToolbar();
       const title=document.getElementById('sectionTitle');
@@ -180,12 +215,18 @@
       // The unrated films must remain at the very top of the grid.
       const g=document.getElementById('grid');
       const podium=g.querySelector(':scope > .reel-podium');
-      if(podium){
+      if(podium && unratedPlacement==='top'){
         const pending=[...g.children].filter(el=>
           el.matches('.movie[data-id]') && !hasRating(movies.find(m=>m.id===el.dataset.id)));
         if(pending.length)pending[pending.length-1].after(podium);
       }
       if(yearFilter==='all')renderYearCards();
+      const subtitle=document.getElementById('sectionSub');
+      if(subtitle && sorted().some(m=>!hasRating(m))){
+        subtitle.textContent=unratedPlacement==='bottom'
+          ? 'Scored movies first · unrated movies last'
+          : 'Unrated movies first · scored movies follow';
+      }
     }
   };
 
@@ -255,6 +296,17 @@
   });
   const style=document.createElement('style');
   style.textContent=`
+    .reel-count-controls{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;min-width:0;}
+    .reel-unrated-filter{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+      min-height:33px;padding:7px 10px;border:1px solid #4a536a;border-radius:10px;
+      background:#232c3d;color:#e4e9f3;font-size:11px;font-weight:800;white-space:nowrap;
+      transition:background .18s,border-color .18s;}
+    .reel-unrated-filter:hover{background:#343b51;border-color:#9a8097;}
+    .reel-unrated-filter[aria-pressed="true"]{border-color:#bea18e;color:#f6d0ad;background:#3a3037;}
+    .reel-unrated-filter .reel-filter-symbol{font-size:16px;line-height:1;transform:rotate(180deg);color:#e9ba9f;}
+    .reel-unrated-filter.hide{display:none!important;}
+    @media(max-width:640px){.reel-count-controls{gap:7px;}.reel-count-controls .section-sub{font-size:10px;}
+      .reel-unrated-filter{font-size:10px;min-height:31px;padding:6px 8px;}}
     .reel-top10-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
       margin:5px 0 22px;padding:17px 20px;border-radius:17px;border:1px solid #6c5764;
       background:linear-gradient(120deg,#282330,#1b2534);}
