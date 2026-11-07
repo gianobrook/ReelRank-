@@ -113,7 +113,7 @@
 <div class="ambient"></div><div class="ambient r"></div><div class="shell"><header class="topbar"><a href="#" class="brand"><span class="brand-icon">✦</span>reelrank<span style="color:var(--coral)">.</span><small>MY PERSONAL CINEMA DIARY</small></a><div class="top-actions"><span class="badge" id="syncBadge"><span class="dot"></span>Checking movies…</span><button class="btn" id="settingsBtn" title="Settings">⚙ <span class="desktop-text">Settings</span></button><button class="btn primary" id="addBtn">+ Movie</button></div></header>
 <section class="hero"><div><div class="eyebrow">THE MOVIE DIARY · 2026 AND BEYOND</div><h1>Your year <em>in film.</em></h1><p>Every story you watched. Your scores. Your ranking. A personal movie journal that feels as good as movie night.</p></div><div class="hero-right"><span class="film">🎞</span><div><strong>AMC A-List</strong><small>Imported from your ticket history</small></div></div></section>
 <section class="metrics"><article class="metric"><span>Movies in your collection</span><strong id="statTotal">55</strong><div class="sub">Uncanceled AMC bookings</div></article><article class="metric"><span>Movies rated</span><strong id="statRated">0 <small>/ 55</small></strong><div class="sub">Your personal scores</div></article><article class="metric"><span>Average score</span><strong id="statAvg">—</strong><div class="sub">Out of 10</div></article><article class="metric"><span>Top pick</span><strong id="statTop" style="font-size:15px;letter-spacing:-.4px;line-height:1.45">Not rated yet</strong><div class="sub">Your highest-rated film</div></article></section>
-<div class="controls"><div class="tabs" role="tablist"><button id="tab-all" data-view="all" class="tab active" role="tab">All movies</button><button id="tab-rated" data-view="rated" class="tab" role="tab">My rankings</button><button id="tab-manual" data-view="year" class="tab" role="tab">✨ My Year</button></div><div class="search-row"><div class="search"><span style="opacity:.7">⌕</span><input type="search" id="search" placeholder="Search movies..." autocomplete="off" aria-label="Search movies"></div><select class="pill" id="yearSelect" aria-label="Filter by year"><option value="all">All-Time</option><option value="2026" selected>2026</option></select></div></div>
+<div class="controls"><div class="tabs" role="tablist"><button id="tab-all" data-view="all" class="tab active" role="tab">🏆 Top 10</button><button id="tab-rated" data-view="rated" class="tab" role="tab">My rankings</button><button id="tab-manual" data-view="year" class="tab" role="tab">✨ My Year</button></div><div class="search-row"><div class="search"><span style="opacity:.7">⌕</span><input type="search" id="search" placeholder="Search movies..." autocomplete="off" aria-label="Search movies"></div><select class="pill" id="yearSelect" aria-label="Filter by year"><option value="all">All-Time</option><option value="2026" selected>2026</option></select></div></div>
 
 <div id="rankingBar" class="ranking-bar hide" style="display:none"><span>Sort rankings by</span><div class="ranking-switch"><button type="button" id="orderByBattle">⚔️ Battle placement</button><button type="button" id="orderByScore">★ Your scores</button></div></div>
 <div class="count-row"><div class="section-title" id="sectionTitle">Your collection</div><span class="section-sub" id="sectionSub">55 films</span></div>
@@ -133,23 +133,41 @@ for(let m of (saved.extra||[]))if(!movies.some(x=>x.id===m.id))movies.push(m);
 function normName(t){return String(t||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim()}
 function setSyncStatus(msg,ok){const el=document.getElementById('syncBadge');if(!el)return; el.innerHTML=`<span class="dot" style="background:${ok?'#8ce1bb':'#f5af89'}"></span>${escapeHtml(msg)}`}
 function updateYearMenu(){const sel=document.querySelector('#yearSelect');const curr=sel.value;const years=[...new Set(movies.map(m=>m.year))].sort((a,b)=>b-a);sel.innerHTML='<option value="all">All-Time</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');sel.value=[...sel.options].some(o=>o.value===curr)?curr:'all'}
-function mergeCloudCatalog(rows){let added=0;let updated=0;for(const c of rows){
- if(!c || !c.slug || !c.title || !Number.isFinite(Number(c.release_year)))continue;
- const match=movies.find(m=>m.id==='cloud-'+c.slug) || movies.find(m=>m.year==c.release_year && normName(m.title)===normName(c.title));
- if(match){
-  // Keep personal fields, especially score/notes/seen/order, unchanged.
-  if(c.watched_date && match.date!==c.watched_date && match.source!=='Letterboxd'){match.date=c.watched_date;updated++}
-  if(c.poster_url && !match.poster)match.poster=c.poster_url;
- }else{
-  movies.push({id:'cloud-'+c.slug,title:c.title,year:Number(c.release_year),date:c.watched_date||'',score:null,notes:'',poster:c.poster_url||'',seen:true,order:Math.max(-1,...movies.map(m=>m.order||0))+1,source:'AMC cloud catalog'});
-  added++;
- }
+
+function mergeCloudCatalog(rows){
+ let added=0,updated=0;const now=Date.now();
+ for(const c of rows){
+  if(!c || !c.slug || !c.title || !Number.isFinite(Number(c.release_year)))continue;
+  const status=String(c.booking_status||'unknown').toLowerCase();
+  const showtime=typeof c.showtime_at==='string'?Date.parse(c.showtime_at):NaN;
+  const candidates=movies.filter(m=>normName(m.title)===normName(c.title));
+  const match=movies.find(m=>m.id==='cloud-'+c.slug)
+     || movies.find(m=>m.year==c.release_year && normName(m.title)===normName(c.title))
+     || (candidates.length===1?candidates[0]:null);
+  if(status==='canceled'||status==='cancelled'){
+   // Keep existing personal ratings and notes, but hide canceled-only cloud bookings.
+   if(match && match.source==='AMC cloud catalog' && !hasRating(match) && match.seen!==false){match.seen=false;updated++;}
+   continue;
+  }
+  if(Number.isFinite(showtime) && now<showtime+60*60*1000){
+    // Upcoming screenings are tracked by the cloud, not counted as watched yet.
+    continue;
+  }
+  if(match){
+   if(c.watched_date && match.date!==c.watched_date && match.source!=='Letterboxd'){match.date=c.watched_date;updated++;}
+   if(c.poster_url && !match.poster)match.poster=c.poster_url;
+   if(Number.isFinite(showtime) && match.showtimeAt!==c.showtime_at){match.showtimeAt=c.showtime_at;updated++;}
+   if(status!=='unknown' && match.bookingStatus!==status){match.bookingStatus=status;updated++;}
+  }else{
+   movies.push({id:'cloud-'+c.slug,title:c.title,year:Number(c.release_year),date:c.watched_date||'',score:null,notes:'',poster:c.poster_url||'',seen:true,order:Math.max(-1,...movies.map(m=>m.order||0))+1,source:'AMC cloud catalog',showtimeAt:Number.isFinite(showtime)?c.showtime_at:'',bookingStatus:status});
+   added++;
+  }
  }
  if(added||updated){save();updateYearMenu();render()}
  return added;
 }
 async function refreshCatalog(silent=false){
- const url=CLOUD_URL+'/rest/v1/movie_catalog?select=slug,title,release_year,watched_date,poster_url&order=watched_date.asc&limit=1000';
+ const url=CLOUD_URL+'/rest/v1/movie_catalog?select=slug,title,release_year,watched_date,poster_url,showtime_at,booking_status&order=watched_date.asc&limit=1000';
  try{
   const ac=new AbortController();const timer=setTimeout(()=>ac.abort(),12000);
   const response=await fetch(url,{method:'GET',mode:'cors',headers:{'apikey':CLOUD_PUBLIC_KEY,'Accept':'application/json'},signal:ac.signal,cache:'no-store'});
@@ -412,7 +430,7 @@ out.innerHTML=output;
 }
 
 function podiumHtml(top,ranks,totalRanked){const labels=['THE CHAMPION','THE SILVER STAR','THE BRONZE HONOR'];const icons=['✦','✧','✦'];return `<div class="reel-podium" aria-label="The top ${top.length} movies in your ${yearFilter==='all'?'all-time':yearFilter} ranking"><div class="podium-heading"><div class="podium-kicker">✧ THE REELRANK HALL OF FAME ✧</div><h2>Your <em>finest films.</em></h2><p>Three favorites. One unforgettable podium. Ranked your way.</p></div><div class="podium-row ${top.length===1?'one':''} ${top.length===2?'two':''}">${top.map((m,i)=>`<div class="podium-slot podium-place-${i+1}"><div class="podium-place"><span>${icons[i]}</span> ${labels[i]} <span>${icons[i]}</span></div>${card(m,ranks,totalRanked)}</div>`).join('')}</div><div class="podium-footnote">✦ Your podium follows your chosen ranking method ✦</div></div>`}
-function render(){summary();const a=sorted(),grid=document.querySelector('#grid'),dashboard=document.querySelector('#yearDashboard'),battlePanel=document.querySelector('#battleDashboard'),isYear=view==='year',isBattle=view==='battle';dashboard.classList.toggle('hide',!isYear);battlePanel.classList.toggle('hide',!isBattle);grid.classList.toggle('hide',isYear||isBattle);document.querySelector('.count-row').classList.toggle('hide',isYear||isBattle);document.querySelector('.search').classList.toggle('hide',isYear||isBattle);document.querySelector('#yearSelect').classList.toggle('hide',isBattle);grid.classList.remove('arrange');const bar=document.querySelector('#rankingBar');bar.classList.toggle('hide',isYear||isBattle);document.querySelector('#orderByBattle').classList.toggle('active',useBattlePlacement());document.querySelector('#orderByBattle').disabled=!hasBattleRanking();document.querySelector('#orderByScore').classList.toggle('active',!useBattlePlacement());let ranks=scoreMap(),totalRanked=Object.keys(ranks).length;const showPodium=!isYear&&!isBattle&&!query.trim()&&(view==='all'||view==='rated')&&totalRanked>0;const podiumMovies=showPodium?a.filter(m=>ranks[m.id]!==undefined).slice(0,3):[];const podiumIds=new Set(podiumMovies.map(x=>x.id));const rest=showPodium?a.filter(x=>!podiumIds.has(x.id)):a;document.querySelector('#sectionTitle').textContent=view==='rated'?(showPodium?'Your other ranked films':'Your ranked favorites'):(showPodium?'More from your collection':'Your collection');document.querySelector('#sectionSub').textContent=a.length+' '+(a.length===1?'movie':'movies');if(isYear){renderYearDashboard()}else if(isBattle){renderBattleDashboard()}else{grid.innerHTML=a.length?(showPodium?podiumHtml(podiumMovies,ranks,totalRanked):'')+(rest.length?rest.map(m=>card(m,ranks,totalRanked)).join(''):''):`<div class="empty" style="grid-column:1/-1"><strong>Nothing here yet.</strong>${view==='rated'?'Give movies scores or complete a Battle to start ranking.':'Try another search.'}</div>`;watchPosters()}document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view===view));}
+function render(){summary();const a=sorted(),grid=document.querySelector('#grid'),dashboard=document.querySelector('#yearDashboard'),battlePanel=document.querySelector('#battleDashboard'),isYear=view==='year',isBattle=view==='battle';dashboard.classList.toggle('hide',!isYear);battlePanel.classList.toggle('hide',!isBattle);grid.classList.toggle('hide',isYear||isBattle);document.querySelector('.count-row').classList.toggle('hide',isYear||isBattle);document.querySelector('.search').classList.toggle('hide',isYear||isBattle);document.querySelector('#yearSelect').classList.toggle('hide',isBattle);grid.classList.remove('arrange');const bar=document.querySelector('#rankingBar');bar.classList.toggle('hide',isYear||isBattle);document.querySelector('#orderByBattle').classList.toggle('active',useBattlePlacement());document.querySelector('#orderByBattle').disabled=!hasBattleRanking();document.querySelector('#orderByScore').classList.toggle('active',!useBattlePlacement());let ranks=scoreMap(),totalRanked=Object.keys(ranks).length;const showPodium=!isYear&&!isBattle&&!query.trim()&&(view==='all'||view==='rated')&&totalRanked>0 && !(view==='rated'&&a.some(m=>!hasRating(m)));const podiumMovies=showPodium?a.filter(m=>ranks[m.id]!==undefined).slice(0,3):[];const podiumIds=new Set(podiumMovies.map(x=>x.id));const rest=showPodium?a.filter(x=>!podiumIds.has(x.id)):a;document.querySelector('#sectionTitle').textContent=view==='rated'?(showPodium?'Your other ranked films':'Your ranked favorites'):(showPodium?'More from your collection':'Your collection');document.querySelector('#sectionSub').textContent=a.length+' '+(a.length===1?'movie':'movies');if(isYear){renderYearDashboard()}else if(isBattle){renderBattleDashboard()}else{grid.innerHTML=a.length?(showPodium?podiumHtml(podiumMovies,ranks,totalRanked):'')+(rest.length?rest.map(m=>card(m,ranks,totalRanked)).join(''):''):`<div class="empty" style="grid-column:1/-1"><strong>Nothing here yet.</strong>${view==='rated'?'Give movies a score to start ranking.':'Try another search.'}</div>`;watchPosters()}document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view===view));}
 function toast(msg){const el=document.querySelector('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(window._t);window._t=setTimeout(()=>el.classList.remove('show'),2400)}
 function setScore(id,raw){const m=movies.find(x=>x.id===id);if(!m)return;if(raw.trim()===''){m.score=null;}else{let n=Number(raw);if(!Number.isFinite(n)||n<0||n>10){toast('Use a score from 0 to 10');render();return;}m.score=Math.round(n*10)/10;}save();render();toast('Ranking updated ✓')}
 function openModal(title,content){document.querySelector('#dialogTitle').textContent=title;document.querySelector('#dialogContent').innerHTML=content;document.querySelector('#shade').classList.add('open');document.querySelector('#shade').setAttribute('aria-hidden','false');}
