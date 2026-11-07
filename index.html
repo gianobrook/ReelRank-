@@ -138,7 +138,7 @@ function mergeCloudCatalog(rows){let added=0;let updated=0;for(const c of rows){
  const match=movies.find(m=>m.id==='cloud-'+c.slug) || movies.find(m=>m.year==c.release_year && normName(m.title)===normName(c.title));
  if(match){
   // Keep personal fields, especially score/notes/seen/order, unchanged.
-  if(c.watched_date && match.date!==c.watched_date){match.date=c.watched_date;updated++}
+  if(c.watched_date && match.date!==c.watched_date && match.source!=='Letterboxd'){match.date=c.watched_date;updated++}
   if(c.poster_url && !match.poster)match.poster=c.poster_url;
  }else{
   movies.push({id:'cloud-'+c.slug,title:c.title,year:Number(c.release_year),date:c.watched_date||'',score:null,notes:'',poster:c.poster_url||'',seen:true,order:Math.max(-1,...movies.map(m=>m.order||0))+1,source:'AMC cloud catalog'});
