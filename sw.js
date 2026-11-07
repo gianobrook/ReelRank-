@@ -1,4 +1,4 @@
-const CACHE='reelrank-pwa-v14-unrated-filter';
+const CACHE='reelrank-pwa-v15-unrated-bottom-default';
 const SHELL=['./','./index.html','./manifest.webmanifest','./icon.svg','./icon-180.png','./letterboxd-integration.js', './reelrank-ties-and-posters.js', './reelrank-smooth-drag.js', './reelrank-top10-postshow.js', './reelrank-custom-top10-yearly.js'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
