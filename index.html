@@ -449,7 +449,6 @@ void refreshCatalog(true);
 setInterval(()=>{if(!document.hidden)void refreshCatalog(true)},5*60*1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshCatalog(true)});
 </script>
-<script src="./letterboxd-import.js"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
