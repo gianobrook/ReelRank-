@@ -176,10 +176,11 @@
       this.disabled = true;
       this.textContent = 'Finding film poster…';
       delete posterCache[posterId(m)];
-      cachePoster(m,''); // Clear the previous bad match, then remove sentinel to refetch.
-      delete posterCache[posterId(m)];
       localStorage.setItem(POSTER_CACHE_KEY,JSON.stringify(posterCache));
+      const previouslyManual = Boolean(m.posterManual);
+      m.posterManual = false;
       const url = await getPoster(m);
+      m.posterManual = previouslyManual;
       if (url) {
         field.value = url;
         this.textContent = '✓ Poster found';
@@ -253,6 +254,12 @@
   };
 
   const gridEl = document.getElementById('grid');
+  // The grip is for moving movies, not opening the movie editor on tap.
+  gridEl.addEventListener('click', e => {
+    if (e.target.closest('.tied-sortable .handle')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+    }
+  }, true);
   let pointerDrag = null;
   let htmlDrag = null;
   let highlight = null;
