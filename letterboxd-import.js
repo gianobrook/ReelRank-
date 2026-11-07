@@ -68,7 +68,7 @@
       if (entry.dir || path.includes('../')) continue;
       const name = path.split('/').pop().toLowerCase();
       if (!['watched.csv', 'ratings.csv', 'diary.csv', 'watchlist.csv', 'reviews.csv', 'profile.csv'].includes(name)) continue;
-      if (path.includes('/deleted/') || path.includes('/orphaned/') || path.includes('/likes/')) continue;
+      if (/(^|\/)(deleted|orphaned|likes)\//i.test(path)) continue;
       const bytes = entry._data && entry._data.uncompressedSize;
       if (bytes && bytes > 5 * 1024 * 1024) throw Error('An archive entry is too large.');
       total += bytes || 0;
