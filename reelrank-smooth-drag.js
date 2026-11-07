@@ -93,12 +93,17 @@
 
     const siblings = movies.filter(m=>hasRating(m) && Number(m.score) === Number(source.score))
       .slice().sort(rankSorter);
-    const from = siblings.findIndex(m=>m.id===fromId);
-    const to = siblings.findIndex(m=>m.id===toId);
+    const displayed = new Set([...grid.querySelectorAll('.movie[data-id]')].map(el=>el.dataset.id));
+    // Reorder only on-screen tied films. Off-screen years and hidden movies retain their slots.
+    const slots = siblings.map((m,i)=>displayed.has(m.id)?i:-1).filter(i=>i>=0);
+    const visible = slots.map(i=>siblings[i]);
+    const from = visible.findIndex(m=>m.id===fromId);
+    const to = visible.findIndex(m=>m.id===toId);
     if (from < 0 || to < 0 || from === to) return false;
 
     const before = snapshotRects();
-    siblings.splice(to,0,siblings.splice(from,1)[0]);
+    visible.splice(to,0,visible.splice(from,1)[0]);
+    slots.forEach((slot,i)=>{siblings[slot]=visible[i];});
     siblings.forEach((m,i)=>{m.order=i+1;});
     render();
     if (active && active.source === fromId) {
@@ -152,6 +157,8 @@
     const r = cardEl.getBoundingClientRect();
     clone.style.width = r.width + 'px';
     clone.style.height = r.height + 'px';
+    // Avoid a one-frame flash at the top-left before the first animation frame.
+    clone.style.transform = 'translate3d(' + r.left + 'px,' + r.top + 'px,0) scale(1.045)';
     document.body.appendChild(clone);
     return clone;
   }
