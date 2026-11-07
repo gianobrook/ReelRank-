@@ -1,4 +1,4 @@
-/* ReelRank Letterboxd bridge. Public Letterboxd archive, editable device-local state. */
+/* ReelRank Letterboxd import. All data stays in the iPhone's own localStorage. */
 (function () {
   'use strict';
   const KEY='reelrank-letterboxd-local-v1';
@@ -23,9 +23,7 @@
     return diaryRows.filter(d=>Number(d[0])===index && /^\d{4}-\d\d-\d\d$/.test(d[2]||'')).reduce((latest,d)=>!latest||d[2]>latest?d[2]:latest,'');
   }
   function importArchive(data){
-    if(!data || !Array.isArray(data.watched) || data.watched.length!==299 ||
-      !Array.isArray(data.diary) || data.diary.length!==222 ||
-      !Array.isArray(data.watchlist) || data.watchlist.length!==46)throw Error('Archive is incomplete');
+    if(!data || !Array.isArray(data.watched) || !Array.isArray(data.diary) || !Array.isArray(data.watchlist) || !data.watched.length)throw Error('No Letterboxd watched films found');
     let added=0,ratings=0;
     let nextOrder=Math.max(0,...movies.map(m=>Number(m.order)||0))+1;
     data.watched.forEach((w,i)=>{
@@ -34,10 +32,10 @@
       let m=filmFor(title,year),actual=maxDateFor(i,data.diary);
       if(!m){
         const id='letterboxd-'+key(title,year).replace(/[^a-z0-9]+/g,'-');
-        m={id,title,year,date:actual||'',score:Math.round(Number(stars)*20)/10,notes:'',poster:'',seen:true,order:nextOrder++,source:'Letterboxd'};
-        movies.push(m);added++;ratings++;
-      }else if((m.score===null||m.score===undefined||m.score==='')&&Number.isFinite(Number(stars))){
-        m.score=Math.round(Number(stars)*20)/10;ratings++;
+        m={id,title,year,date:actual||'',score:stars===null||stars===''?null:Math.round(Number(stars)*2*10)/10,notes:'',poster:'',seen:true,order:nextOrder++,source:'Letterboxd'};
+        movies.push(m);added++;if(m.score!==null)ratings++;
+      }else if((m.score===null||m.score===undefined||m.score==='')&&stars!==null&&stars!==''&&Number.isFinite(Number(stars))){
+        m.score=Math.round(Number(stars)*2*10)/10;ratings++;
       }
       if(actual && !m.date && !String(m.source||'').startsWith('AMC')) m.date=actual;
       const safe=archiveUrl(url);
@@ -47,9 +45,9 @@
     data.diary.forEach((d)=>{
       const w=data.watched[d[0]];if(!w)return;
       const [title,year]=w;
-      const id=String(d[0])+'|'+String(d[1])+'|'+String(d[2])+'|'+String(d[5]);
+      const id=String(d[5]||'')+'|'+key(title,year)+'|'+String(d[1])+'|'+String(d[2]);
       if(knownDiary.has(id))return;
-      state.diary.push({id,key:key(title,year),title,year,createdDate:d[1]||'',watchedDate:d[2]||'',score:d[3]===null?null:Number(d[3])*2,rewatch:!!d[4],url:archiveUrl(d[5])||'',tags:d[6]||'',review:''});
+      state.diary.push({id,key:key(title,year),title,year,createdDate:d[1]||'',watchedDate:d[2]||'',score:d[3]===null?null:Number(d[3])*2,rewatch:!!d[4],url:archiveUrl(d[5])||'',tags:d[6]||'',review:(data.reviewByUri||{})[d[5]]||''});
       knownDiary.add(id);
     });
     const knownWatch=new Set(state.watchlist.map(x=>x.key));
@@ -59,24 +57,116 @@
       knownWatch.add(k);
     });
     state.favoriteFilmUrls=Array.isArray(data.favoriteFilmUrls)?data.favoriteFilmUrls.filter(x=>archiveUrl(x)):state.favoriteFilmUrls;
-    state.loaded=true;state.importedAt=new Date().toISOString();state.sourceCounts={watched:299,diary:222,watchlist:46};
+    state.loaded=true;state.importedAt=new Date().toISOString();state.sourceCounts={watched:data.watched.length,diary:data.diary.length,watchlist:data.watchlist.length};
     persist();save();updateYearMenu();
     if(yearFilter==='2026' && !sessionStorage.getItem('reelrank-letterboxd-year-chosen')){
       yearFilter='all';document.querySelector('#yearSelect').value='all';
     }
     render();
-    toast('Letterboxd imported: '+added+' films added, '+ratings+' ratings loaded');
+    toast('Imported '+added+' films · '+ratings+' ratings · '+state.diary.length+' diary entries');
   }
-  async function loadData(){
-    if(state.loaded)return;
-    try{
-      const res=await fetch('./letterboxd-data.json',{cache:'no-store'});
-      if(!res.ok)throw Error('Archive download failed');
-      const data=await res.json();
+  // Parse RFC4180 CSV with quoted commas, embedded newlines and doubled quotes.
+  function csvRows(text) {
+    text=text.replace(/^\uFEFF/,'');
+    const lines=[];let row=[],cell='',quoted=false;
+    for(let i=0;i<text.length;i++){
+      const ch=text[i];
+      if(quoted){
+        if(ch==='"' && text[i+1]==='"'){cell+='"';i++;}
+        else if(ch==='"')quoted=false;
+        else cell+=ch;
+      }else if(ch==='"') quoted=true;
+      else if(ch===','){row.push(cell);cell='';}
+      else if(ch==='\n'||ch==='\r'){
+        if(ch==='\r'&&text[i+1]==='\n')i++;
+        row.push(cell);if(row.some(x=>x!==''))lines.push(row);
+        row=[];cell='';
+      }else cell+=ch;
+      if(lines.length>100000)throw Error('This archive has too many rows');
+    }
+    if(quoted)throw Error('Unclosed CSV quote');
+    row.push(cell);if(row.some(x=>x!==''))lines.push(row);
+    if(!lines.length)return [];
+    const headers=lines.shift().map(s=>s.trim());
+    return lines.map(cols=>Object.fromEntries(headers.map((h,i)=>[h,cols[i]||''])));
+  }
+  function archiveFromCsv(entries) {
+    const required=['watched.csv','ratings.csv','diary.csv','watchlist.csv'];
+    const tables={};
+    for(const name of [...required,'profile.csv','reviews.csv']){
+      const content=entries[name];if(!content && required.includes(name))throw Error('Letterboxd export missing '+name);
+      tables[name]=content?csvRows(new TextDecoder('utf-8',{fatal:true}).decode(content)):[];
+    }
+    const k=(t,y)=>key(t,y);
+    const ratings=new Map(tables['ratings.csv'].map(r=>[k(r.Name,r.Year),r]));
+    const watched=tables['watched.csv'].map(r=>{
+      const match=ratings.get(k(r.Name,r.Year));
+      const star=match && match.Rating!==''?Number(match.Rating):null;
+      return [r.Name,Number(r.Year),r.Date,r['Letterboxd URI'],star,match?.Date||''];
+    }).filter(r=>r[0]&&Number.isInteger(r[1])&&r[1]>=1888&&r[1]<=2100);
+    if(!watched.length)throw Error('No watched movies found in the Letterboxd export');
+    const idx=new Map(watched.map((w,i)=>[k(w[0],w[1]),i]));
+    const diary=tables['diary.csv'].map(r=>[
+      idx.get(k(r.Name,r.Year)),r.Date,r['Watched Date']||'',r.Rating!==''?Number(r.Rating):null,
+      /^(yes|true|1)$/i.test(r.Rewatch||''),r['Letterboxd URI']||'',r.Tags||''
+    ]).filter(d=>d[0]!==undefined);
+    const watchlist=tables['watchlist.csv'].filter(r=>r.Name&&Number.isInteger(Number(r.Year))).map(r=>
+      [r.Name,Number(r.Year),r.Date,r['Letterboxd URI']||'']);
+    const profile=tables['profile.csv'][0]||{};
+    const favoriteFilmUrls=(profile['Favorite Films']||'').split(/,\s*/).filter(Boolean);
+    const reviewByUri={};
+    for(const r of tables['reviews.csv'])if(r['Letterboxd URI']&&r.Review)reviewByUri[r['Letterboxd URI']]=r.Review;
+    return {watched,diary,watchlist,favoriteFilmUrls,reviewByUri};
+  }
+  let loaderPromise=null;
+  async function ensureZipReader() {
+    if(window.fflate?.unzipSync)return window.fflate;
+    if(loaderPromise)return loaderPromise;
+    loaderPromise=new Promise((resolve,reject)=>{
+      const tag=document.createElement('script');
+      tag.src='https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js';
+      tag.async=true;
+      tag.onload=()=>window.fflate?.unzipSync?resolve(window.fflate):reject(Error('Unzip library did not load'));
+      tag.onerror=()=>reject(Error('Could not load the ZIP reader. Check your connection.'));
+      document.head.appendChild(tag);
+    }).catch(e=>{loaderPromise=null;throw e;});
+    return loaderPromise;
+  }
+  async function parseArchiveFile(file) {
+    if(file.size>25_000_000)throw Error('The export is too large (25 MB limit)');
+    if(/\.json$/i.test(file.name)){
+      const j=JSON.parse(await file.text());
+      return j.letterboxd&&j.watched===undefined?j.letterboxd:j;
+    }
+    if(!/\.zip$/i.test(file.name))throw Error('Choose the ZIP downloaded from Letterboxd');
+    const fflate=await ensureZipReader();
+    const raw=new Uint8Array(await file.arrayBuffer());
+    let budget=35_000_000;
+    const unzipped=fflate.unzipSync(raw,{filter(meta){
+      const name=(meta.name||'').replace(/^.*\//,'');
+      if(!/^(watched|ratings|diary|watchlist|profile|reviews)\.csv$/i.test(name))return false;
+      const length=meta.originalSize||0;
+      if(length>12_000_000||length>budget)throw Error('Archive CSV is unexpectedly large');
+      budget-=length;return true;
+    }});
+    const files={};
+    for(const [name,contents] of Object.entries(unzipped)){
+      if(!name.includes('/') && /\.csv$/i.test(name))files[name.toLowerCase()]=contents;
+    }
+    return archiveFromCsv(files);
+  }
+  async function importSelectedFile(file){
+    try {
+      if(!file)return;
+      const data=await parseArchiveFile(file);
+      const details=data.watched.length+' watched films, '+data.diary.length+' diary entries and '+data.watchlist.length+' watchlist films';
+      if(!confirm('Merge '+details+' into ReelRank? Existing scores and notes will be kept.'))return;
       importArchive(data);
-    }catch(err){
-      console.error('Letterboxd import:',err);
-      toast('Letterboxd data could not load. Open Settings to retry.');
+      closeModal();
+      toast('Letterboxd import complete. Your collection is editable.');
+    } catch(err){
+      console.error('Letterboxd import failed',err);
+      alert('Could not import Letterboxd: '+(err?.message||'Unknown error'));
     }
   }
   const css=[
@@ -226,13 +316,14 @@
     previousSettings();
     const el=document.querySelector('#dialogContent');
     el.insertAdjacentHTML('beforeend','<div class="sync-box" style="margin-top:20px"><strong>Letterboxd archive</strong><p>'+
-      (state.loaded?'299 watched films, 299 ratings, 222 diary entries and 46 watchlist films were supplied from your Letterboxd export.':'Your Letterboxd archive is being loaded.')+
+      (state.loaded?esc(state.sourceCounts?.watched||0)+' watched films · '+state.diary.length+' diary entries · '+state.watchlist.length+' watchlist films saved on this device.':'Import your Letterboxd ZIP here. Your files and ratings never leave your device.')+
       ' Your edits stay on this device, and are not overwritten by catalog refreshes.</p>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="lbGoDiary">View diary</button><button class="btn" id="lbGoWatch">View watchlist</button>'+
-      '<button class="btn" id="lbRetry">Check archive</button></div></div>');
+      '<button class="btn primary" id="lbRetry">↑ Import Letterboxd ZIP</button><input type="file" id="lbZipFile" accept=".zip,.json,application/zip,application/json" style="display:none"></div></div>');
     document.getElementById('lbGoDiary').onclick=()=>{closeModal();view='diary';document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view==='diary'));render();};
     document.getElementById('lbGoWatch').onclick=()=>{closeModal();view='watchlist';document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view==='watchlist'));render();};
-    document.getElementById('lbRetry').onclick=()=>{closeModal();void loadData();};
+    document.getElementById('lbRetry').onclick=()=>document.getElementById('lbZipFile').click();
+    document.getElementById('lbZipFile').onchange=e=>{const file=e.target.files?.[0];void importSelectedFile(file);};
     // Ensure the app's existing backup includes all imported diary/watchlist edits.
     document.getElementById('exportBtn').onclick=()=>{
       const data={version:4,movies,posterCache,awards:awardChoices,battleData,letterboxd:state,exportedAt:new Date().toISOString()};
@@ -254,5 +345,4 @@
   document.querySelector('#settingsBtn').onclick=openSettings;
   document.querySelector('#yearSelect').addEventListener('change',()=>{sessionStorage.setItem('reelrank-letterboxd-year-chosen','1');});
   render();
-  void loadData();
 })();
