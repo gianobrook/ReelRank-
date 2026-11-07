@@ -90,6 +90,18 @@
     const source = movieById(fromId), target = movieById(toId);
     if (!isSortable(source) || !isSortable(target) ||
         Number(source.score) !== Number(target.score) || fromId === toId) return false;
+    if(view==='all' && typeof window.reelrankMoveTopTenTie==='function'){
+      const before=snapshotRects();
+      if(!window.reelrankMoveTopTenTie(fromId,toId))return false;
+      render();
+      if(active && active.source===fromId){
+        grid.querySelectorAll('.movie[data-id]').forEach(el=>{
+          if(el.dataset.id===fromId)el.classList.add('tied-source-placeholder');
+        });
+      }
+      animateNewPositions(before);
+      return true;
+    }
 
     const siblings = movies.filter(m=>hasRating(m) && Number(m.score) === Number(source.score))
       .slice().sort(rankSorter);
