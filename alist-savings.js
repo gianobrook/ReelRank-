@@ -8,7 +8,7 @@
   let pricesLoaded = false;
   let ledgerStatus = 'loading';
   let lastPull = 0;
-  let settings = {startMonth:'', endMonth:'', billingDay:0, pauseMonths:[], monthlyCosts:{}, manualPrices:{}, includeWaivedFees:false};
+  let settings = {startMonth:'', endMonth:'', billingDay:0, pauseMonths:[], monthlyCosts:{}, manualPrices:{}, estimatedTicketPriceCents:2250, includeWaivedFees:false};
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE) || 'null');
     if (saved && typeof saved === 'object') settings = Object.assign(settings, saved);
@@ -58,6 +58,8 @@
     const today = localParts(now);
     return movies.filter(m => {
       if (m.seen === false || !m.date || m.date > today) return false;
+      const showtimeMs = Date.parse(m.showtimeAt || '');
+      if (m.date === today && (!Number.isFinite(showtimeMs) || showtimeMs > now.getTime())) return false;
       const amc = String(m.id || '').startsWith('cloud-') || String(m.id || '').startsWith('amc-') || String(m.source || '').toLowerCase().includes('amc');
       if (!amc || ['canceled','cancelled','refunded','no_show'].includes(String(m.bookingStatus || '').toLowerCase())) return false;
       const ts = Date.parse(m.showtimeAt || '');
@@ -69,6 +71,8 @@
     const now = new Date();
     const today = localParts(now);
     const filmList = eligibleMovies(now);
+    const estimatedPrice = Math.round(Number(settings.estimatedTicketPriceCents));
+    const estimatedTicketCents = Number.isFinite(estimatedPrice) && estimatedPrice > 0 && estimatedPrice <= 20000 ? estimatedPrice : 2250;
     const actuals = [];
     const covered = new Set();
     const seen = new Set();
@@ -77,6 +81,7 @@
       if (['canceled','cancelled','refunded','no_show'].includes(String(r.booking_status || '').toLowerCase())) continue;
       const at = r.showtime_at ? Date.parse(r.showtime_at) : NaN;
       if (Number.isFinite(at) && at > now.getTime()) continue;
+      if (!Number.isFinite(at) && r.watched_date === today) continue;
       const key = r.movie_slug+'|'+r.watched_date+'|'+String(r.showtime_at || '');
       if (seen.has(key)) continue;
       seen.add(key);
@@ -84,19 +89,20 @@
       const full = Number(r.ticket_value_cents);
       if (!Number.isFinite(full) || !Number.isFinite(discount) || full < 0 || discount < 0) continue;
       actuals.push({slug:r.movie_slug,date:r.watched_date,face:Math.round(full),discount:Math.round(discount),waiver:Math.max(0,Number(r.waived_fee_cents)||0),confirmed:r.booking_status==='attended'});
-      covered.add(r.movie_slug);
+      covered.add(r.movie_slug+'|'+r.watched_date);
     }
     const pending = [];
     const pendingSeen = new Set();
     for (const m of filmList) {
       const key = String(m.id).startsWith('cloud-') ? m.id.slice(6) : slug(m.title)+'-'+m.year;
-      if (covered.has(key) || pendingSeen.has(key)) continue;
-      pendingSeen.add(key);
+      const screeningId = key+'|'+m.date;
+      if (covered.has(screeningId) || pendingSeen.has(screeningId)) continue;
+      pendingSeen.add(screeningId);
       const manual = settings.manualPrices && Number(settings.manualPrices[key]);
       if (Number.isFinite(manual) && manual > 0) {
         actuals.push({slug:key,date:m.date,face:Math.round(manual),discount:Math.round(manual),waiver:0,confirmed:false,manual:true});
       } else {
-        pending.push({slug:key,title:m.title,year:Number(m.year),date:m.date});
+        actuals.push({slug:key,title:m.title,date:m.date,face:estimatedTicketCents,discount:estimatedTicketCents,waiver:0,confirmed:false,estimated:true});
       }
     }
     const earliest = filmList.map(m=>m.date.slice(0,7)).filter(monthRange).sort()[0] || actuals.map(r=>r.date.slice(0,7)).filter(monthRange).sort()[0] || '';
@@ -107,6 +113,9 @@
     for (const month of monthList(start,stop)) {
       if (Array.isArray(settings.pauseMonths) && settings.pauseMonths.includes(month)) continue;
       const year = month.slice(0,4);
+      const day = Number(settings.billingDay);
+      const billedDay = day >= 1 && day <= 31 ? Math.min(day,new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate()) : 1;
+      if (month+'-'+String(billedDay).padStart(2,'0') > today) continue;
       fees[year] = (fees[year] || 0) + rateForMonth(month);
     }
     const byYear = {};
@@ -165,40 +174,43 @@
     const scope = String(yearFilter || 'all');
     const obj = scope === 'all' ? all.all : (all.byYear[scope] || {rows:[],pending:[],net:0,membership:0,discounted:0,waiver:0});
     const label = scope === 'all' ? 'ALL-TIME' : scope;
-    const amount = obj.rows.length ? dollar(obj.net) : '—';
-    let hint;
-    if (!pricesLoaded) hint='Loading ticket prices…';
-    else if (!obj.rows.length) hint=(obj.pending.length ? obj.pending.length+' ticket prices pending' : 'No A-List screenings recorded');
-    else hint=obj.rows.length+' priced screenings'+(obj.pending.length?' · '+obj.pending.length+' prices pending':'')+' · details';
-    if (ledgerStatus === 'offline') hint += ' · offline';
-    counter.innerHTML = '<span class="alist-savings-icon" aria-hidden="true">↗</span><span class="alist-savings-text"><span class="alist-savings-caption">AMC A-List savings · '+html(label)+'</span><span class="alist-savings-value'+(obj.net<0&&obj.rows.length?' loss':'')+'">'+html(amount)+(obj.pending.length&&obj.rows.length?' <span style="font-size:12px;color:#b8c4cf">partial</span>':'')+'</span><span class="alist-savings-hint">'+html(hint)+'</span></span><span class="alist-savings-open" aria-hidden="true">›</span>';
+    const amount = dollar(obj.net);
+    const estimatedCount = obj.rows.filter(r => r.estimated).length;
+    let hint = obj.rows.length+' A-List tickets';
+    if (estimatedCount) hint += ' · '+estimatedCount+' estimated at '+dollar(Math.round(Number(settings.estimatedTicketPriceCents)||2250))+' each';
+    if (!obj.rows.length) hint = 'No eligible past bookings';
+    if (ledgerStatus === 'offline') hint += ' · receipt sync offline';
+    hint += ' · details';
+    counter.innerHTML = '<span class="alist-savings-icon" aria-hidden="true">↗</span><span class="alist-savings-text"><span class="alist-savings-caption">AMC A-List savings · '+html(label)+'</span><span class="alist-savings-value'+(obj.net<0?' loss':'')+'">'+html(amount)+(estimatedCount?' <span style="font-size:12px;color:#b8c4cf">est.</span>':'')+'</span><span class="alist-savings-hint">'+html(hint)+'</span></span><span class="alist-savings-open" aria-hidden="true">›</span>';
   }
   function row(label,value,cls) {return '<div class="alist-detail-stat'+(cls?' '+cls:'')+'"><span>'+html(label)+'</span><strong>'+html(value)+'</strong></div>';}
   function openBreakdown() {
     const all = compute();
     const scope = String(yearFilter || 'all');
     const obj = scope === 'all' ? all.all : (all.byYear[scope]||{rows:[],pending:[],gross:0,discounted:0,waiver:0,membership:0,net:0});
-    const partial = obj.pending.length > 0;
-    const hasData = obj.rows.length > 0;
+    const estimatedCount = obj.rows.filter(r => r.estimated).length;
+    const confirmedCount = obj.rows.filter(r => !r.estimated && !r.manual).length;
     const title = 'A-List savings · '+(scope === 'all' ? 'All time' : scope);
-    let body = '<p class="alist-small">Actual ticket values are taken from your AMC A-List receipts. Membership charges are estimated from known California plan rates, with your adjustments below.</p>';
+    let body = '<p class="alist-small">Tickets without receipt prices are estimated at '+dollar(Number(settings.estimatedTicketPriceCents)||2250)+' each. Real AMC receipt prices take priority automatically. Membership charges follow California plan rates unless you customize them.</p>';
     body += row('Regular ticket value',dollar(obj.gross));
     if (obj.discounted !== obj.gross) body += row('A-List discounts received',dollar(obj.discounted));
     body += row('A-List membership fees','−'+dollar(obj.membership));
-    body += row('Net savings'+(partial?' (partial)':''),hasData?dollar(obj.net):'Waiting for ticket prices','main');
-    body += row('Priced screenings',String(obj.rows.length));
-    body += row('Screenings awaiting ticket prices',String(obj.pending.length));
+    body += row('Net savings'+(estimatedCount?' (estimated)':''),dollar(obj.net),'main');
+    body += row('Screenings counted',String(obj.rows.length));
+    body += row('Receipt-priced screenings',String(confirmedCount));
+    body += row('Estimated-price screenings',String(estimatedCount));
     body += row('Convenience fees waived',dollar(obj.waiver)+(settings.includeWaivedFees?' · included':' · excluded'));
-    if (partial) body+='<p class="alist-small">Not all historical prices have synced yet, so this is a partial total, not your final savings. Past bookings are provisionally counted when AMC attendance is not confirmed.</p>';
+    if (estimatedCount) body+='<p class="alist-small">These are estimates, not verified ticket prices. Past reservations are provisionally counted when AMC attendance is not confirmed.</p>';
     if (all.assumption) body+='<p class="alist-small">Membership start is estimated from your earliest recorded AMC showing ('+html(all.earliest || 'unknown')+'). We assume monthly membership stayed active even in months you did not visit.</p>';
-    body+='<hr style="border:0;border-top:1px solid #333a49;margin:19px 0"><div class="alist-muted-label">Membership settings</div>';
+    body+='<hr style="border:0;border-top:1px solid #333a49;margin:19px 0"><div class="alist-muted-label">Ticket estimate & membership settings</div>';
+    body+='<label class="field">Average ticket price estimate ($)<input id="alistEstimatedTicketPrice" type="number" inputmode="decimal" min="0.01" max="200" step="0.01" value="'+html(((Number(settings.estimatedTicketPriceCents)||2250)/100).toFixed(2))+'"></label>';
     body+='<div class="alist-settings-row"><label class="field">Start month<input id="alistStart" type="month" value="'+html(settings.startMonth || all.start || '')+'"></label><label class="field">End month (optional)<input id="alistEnd" type="month" value="'+html(settings.endMonth || '')+'"></label></div>';
     body+='<div class="alist-settings-row"><label class="field">Billing day of month<input id="alistDay" type="number" min="1" max="31" placeholder="Unknown" value="'+html(settings.billingDay || '')+'"></label><label class="field">A-List monthly fee override ($)<input id="alistFee" type="number" min="0" step=".01" placeholder="Leave for standard rate"></label></div>';
     body+='<label class="field">Monthly fee override applies to<input id="alistFeeMonth" type="month" value="'+html(scope!=='all'?scope+'-01':localParts(new Date()).slice(0,7))+'"></label>';
     body+='<label class="field">Paused / unpaid months (YYYY-MM, comma separated)<input id="alistPauses" placeholder="e.g. 2024-04, 2025-08" value="'+html((settings.pauseMonths || []).join(', '))+'"></label>';
     body+='<label style="display:flex;align-items:center;gap:9px;margin:15px 0;font-size:12px"><input id="alistIncludeFees" type="checkbox" '+(settings.includeWaivedFees?'checked':'')+'> Add waived convenience fees to savings</label>';
     body+='<div class="dialog-actions"><button class="btn primary" id="alistSaveSettings">Save membership settings</button></div>';
-    if (obj.pending.length) {
+    if (false && obj.pending.length) {
       body+='<hr style="border:0;border-top:1px solid #333a49;margin:20px 0"><div class="alist-muted-label">Missing receipt prices (optional)</div><p class="alist-small">Your hourly AMC email sync will fill these in automatically. You can also enter the price for your own A-List ticket (not a guest) below.</p><div class="alist-list">';
       for (const m of obj.pending.slice(0,80)) body += '<label class="alist-list-item"><span>'+html(m.title)+' <small style="color:#9aa4b6">· '+html(m.date)+'</small></span><input data-alist-price="'+html(m.slug)+'" type="number" min="0" step=".01" placeholder="$ Ticket"></label>';
       body+='</div><div class="dialog-actions"><button class="btn" id="alistSavePrices">Save ticket prices</button></div>';
@@ -218,6 +230,9 @@
       const dayValue = document.getElementById('alistDay').value;
       const day = dayValue===''?0:Number(dayValue);
       if (!Number.isInteger(day) || day<0 || day>31) {toast('Billing day must be 1–31');return;}
+      const estimateStr = document.getElementById('alistEstimatedTicketPrice').value;
+      const estimateValue = Number(estimateStr);
+      if (!estimateStr.trim() || !Number.isFinite(estimateValue) || estimateValue<=0 || estimateValue>200) {toast('Average ticket price must be between $0.01 and $200');return;}
       const overrideStr = feeInput.value;
       if (overrideStr!=='' && (!Number.isFinite(+overrideStr)|| +overrideStr<0 || +overrideStr>100)) {toast('Monthly fee must be between $0–$100');return;}
       settings.startMonth = start;
@@ -225,6 +240,7 @@
       settings.billingDay = day;
       settings.pauseMonths = document.getElementById('alistPauses').value.split(',').map(s=>s.trim()).filter(monthRange);
       settings.includeWaivedFees = document.getElementById('alistIncludeFees').checked;
+      settings.estimatedTicketPriceCents = Math.round(estimateValue*100);
       settings.monthlyCosts ||= {};
       if (monthRange(feeMonth.value)) {
         if (overrideStr==='') delete settings.monthlyCosts[feeMonth.value];
